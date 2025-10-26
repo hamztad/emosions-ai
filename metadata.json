@@ -1,0 +1,5 @@
+{
+  "name": "Emosions",
+  "description": "A colorful, playful game where the player places bombs to explode moving emojis. Each bomb explodes after 2 seconds, and the player earns points for emojis caught in the blast radius.",
+  "requestFramePermissions": []
+}

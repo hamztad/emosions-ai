@@ -1,0 +1,387 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Emosions Blast</title>
+    <style>
+        /* --- Basic Setup & Background --- */
+        * {
+            box-sizing: border-box;
+            user-select: none;
+        }
+
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            font-family: 'Arial', sans-serif;
+            color: white;
+        }
+
+        body {
+            background: linear-gradient(45deg, #ff007b, #ff7b00, #ffff00, #00ff7b, #007bff, #7b00ff);
+            background-size: 600% 600%;
+            animation: gradientAnimation 20s ease infinite;
+        }
+
+        @keyframes gradientAnimation {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+
+        /* --- Game Canvas --- */
+        #gameCanvas {
+            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        /* --- UI Elements --- */
+        .ui-button {
+            padding: 12px 24px;
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #fff;
+            background-color: rgba(0, 0, 0, 0.4);
+            border: 2px solid white;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        .ui-button:hover {
+            background-color: rgba(255, 255, 255, 0.3);
+            transform: translateY(-2px);
+        }
+
+        #exitButton {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            z-index: 10;
+        }
+
+        /* --- Overlays (Game Over / Thanks) --- */
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            z-index: 5;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.5s ease;
+        }
+
+        .overlay.visible {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .overlay h1 {
+            font-size: 4rem;
+            margin: 0;
+            text-shadow: 0 0 15px #fff;
+        }
+
+        .overlay p {
+            font-size: 1.5rem;
+            margin: 20px 0;
+        }
+
+        .hidden {
+            display: none; /* Fallback, but opacity is used for transitions */
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <button id="exitButton" class="ui-button">Exit Game</button>
+
+    <div id="gameOverScreen" class="overlay">
+        <h1>Game Over</h1>
+        <p id="finalScore"></p>
+        <p id="longestStreak"></p>
+        <button id="playAgainButton" class="ui-button">Play Again</button>
+    </div>
+
+    <div id="thanksScreen" class="overlay">
+        <h1>Thanks for playing!</h1>
+    </div>
+
+    <script>
+        // --- DOM Elements ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const gameOverScreen = document.getElementById('gameOverScreen');
+        const thanksScreen = document.getElementById('thanksScreen');
+        const finalScoreEl = document.getElementById('finalScore');
+        const longestStreakEl = document.getElementById('longestStreak');
+        const playAgainButton = document.getElementById('playAgainButton');
+        const exitButton = document.getElementById('exitButton');
+
+        // --- Game Constants ---
+        const EMOJI_LIST = ['😃', '😜', '😎', '🤩', '😱', '🤖', '👻', '🐸', '🦄', '🐙'];
+        const EMOJI_COUNT = 10;
+        const BOMB_FUSE_TIME = 2000; // 2 seconds
+        const EXPLOSION_DURATION = 500; // 0.5 seconds
+
+        // --- Game State ---
+        let score = 0;
+        let streak = 0;
+        let longestStreak = 0;
+        let emojis = [];
+        let bombs = [];
+        let explosions = [];
+        let isGameActive = true;
+        let lastTime = 0;
+        
+        // --- Helper Functions ---
+        const getRandom = (min, max) => Math.random() * (max - min) + min;
+
+        // --- Game Initialization ---
+        function setupGame() {
+            // Reset state
+            score = 0;
+            streak = 0;
+            longestStreak = 0;
+            emojis = [];
+            bombs = [];
+            explosions = [];
+            isGameActive = true;
+
+            // Hide overlays
+            gameOverScreen.classList.remove('visible');
+            thanksScreen.classList.remove('visible');
+            exitButton.style.display = 'block';
+
+            // Set canvas size
+            resizeCanvas();
+
+            // Create emojis
+            const baseSize = Math.min(canvas.width, canvas.height) * 0.05;
+            for (let i = 0; i < EMOJI_COUNT; i++) {
+                const size = getRandom(baseSize * 0.8, baseSize * 1.2);
+                const maxSpeed = baseSize * 0.03;
+                emojis.push({
+                    char: EMOJI_LIST[i % EMOJI_LIST.length],
+                    x: getRandom(size, canvas.width - size),
+                    y: getRandom(size, canvas.height - size),
+                    dx: getRandom(-maxSpeed, maxSpeed),
+                    dy: getRandom(-maxSpeed, maxSpeed),
+                    size: size
+                });
+            }
+
+            // Start game loop
+            requestAnimationFrame(gameLoop);
+        }
+        
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+
+        // --- Game Loop ---
+        function gameLoop(timestamp) {
+            if (!isGameActive) return;
+            
+            const deltaTime = timestamp - lastTime;
+            lastTime = timestamp;
+
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Update and draw game objects
+            updateAndDrawEmojis();
+            updateAndDrawBombs();
+            updateAndDrawExplosions();
+
+            // Draw HUD
+            drawHUD();
+            
+            // Continue loop
+            requestAnimationFrame(gameLoop);
+        }
+
+        // --- Emoji Logic ---
+        function updateAndDrawEmojis() {
+            emojis.forEach(emoji => {
+                // Movement
+                emoji.x += emoji.dx;
+                emoji.y += emoji.dy;
+
+                // Wall collision (bounce)
+                if (emoji.x - emoji.size / 2 < 0 || emoji.x + emoji.size / 2 > canvas.width) {
+                    emoji.dx *= -1;
+                }
+                if (emoji.y - emoji.size / 2 < 0 || emoji.y + emoji.size / 2 > canvas.height) {
+                    emoji.dy *= -1;
+                }
+                
+                // Keep emoji within bounds
+                emoji.x = Math.max(emoji.size / 2, Math.min(canvas.width - emoji.size / 2, emoji.x));
+                emoji.y = Math.max(emoji.size / 2, Math.min(canvas.height - emoji.size / 2, emoji.y));
+
+                // Drawing
+                ctx.font = `${emoji.size}px Arial`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(emoji.char, emoji.x, emoji.y);
+            });
+        }
+        
+        // --- Bomb Logic ---
+        function placeBomb(x, y) {
+            if (!isGameActive) return;
+            const size = Math.min(canvas.width, canvas.height) * 0.03;
+            bombs.push({ x, y, size, createdAt: Date.now() });
+
+            // Set timer for explosion
+            setTimeout(() => {
+                const bombIndex = bombs.findIndex(b => b.x === x && b.y === y);
+                if (bombIndex !== -1) {
+                    const [removedBomb] = bombs.splice(bombIndex, 1);
+                    createExplosion(removedBomb.x, removedBomb.y, removedBomb.size * 2);
+                }
+            }, BOMB_FUSE_TIME);
+        }
+
+        function updateAndDrawBombs() {
+            bombs.forEach(bomb => {
+                const timePassed = Date.now() - bomb.createdAt;
+                const pulse = Math.abs(Math.sin(timePassed / 200)); // Pulsing effect
+
+                ctx.beginPath();
+                ctx.arc(bomb.x, bomb.y, bomb.size * (0.8 + pulse * 0.2), 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(255, ${100 - (timePassed / BOMB_FUSE_TIME) * 100}, 0, 0.8)`;
+                ctx.fill();
+                ctx.strokeStyle = 'white';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            });
+        }
+
+        // --- Explosion Logic ---
+        function createExplosion(x, y, radius) {
+            explosions.push({ x, y, maxRadius: radius, createdAt: Date.now() });
+            
+            // Collision detection and scoring
+            const hitEmojis = [];
+            emojis.forEach(emoji => {
+                const dist = Math.sqrt((emoji.x - x)**2 + (emoji.y - y)**2);
+                if (dist < radius + emoji.size / 2) {
+                    hitEmojis.push(emoji);
+                }
+            });
+
+            if (hitEmojis.length > 0) {
+                // Remove hit emojis
+                emojis = emojis.filter(emoji => !hitEmojis.includes(emoji));
+
+                // Calculate score
+                let points = 0;
+                switch (hitEmojis.length) {
+                    case 1: points = 10; break;
+                    case 2: points = 25; break;
+                    case 3: points = 45; break;
+                    default: points = 45 + (hitEmojis.length - 3) * 20;
+                }
+                score += points;
+
+                // Update streak
+                streak++;
+                if (streak > longestStreak) {
+                    longestStreak = streak;
+                }
+
+                // Check for game over
+                if (emojis.length === 0) {
+                    endGame(true);
+                }
+            } else {
+                // Reset streak if bomb hits nothing
+                streak = 0;
+            }
+        }
+
+        function updateAndDrawExplosions() {
+            explosions.forEach((explosion, index) => {
+                const timePassed = Date.now() - explosion.createdAt;
+                const progress = timePassed / EXPLOSION_DURATION;
+                
+                if (progress > 1) {
+                    explosions.splice(index, 1); // Remove old explosions
+                    return;
+                }
+
+                const currentRadius = explosion.maxRadius * Math.sin(progress * Math.PI / 2); // Ease-out effect
+                const opacity = 1 - progress;
+
+                ctx.beginPath();
+                ctx.arc(explosion.x, explosion.y, currentRadius, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(255, 255, 255, ${opacity * 0.8})`;
+                ctx.fill();
+            });
+        }
+
+        // --- HUD and UI Logic ---
+        function drawHUD() {
+            ctx.font = 'bold 36px Arial';
+            ctx.fillStyle = 'white';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'top';
+            ctx.shadowColor = 'rgba(0,0,0,0.5)';
+            ctx.shadowBlur = 5;
+            ctx.fillText(`Score: ${score}`, 20, 20);
+            ctx.fillText(`Streak: ${streak}x`, 20, 60);
+            ctx.shadowColor = 'transparent';
+        }
+        
+        function endGame(isWin) {
+            isGameActive = false;
+            exitButton.style.display = 'none';
+
+            if (isWin) {
+                finalScoreEl.textContent = `Final Score: ${score}`;
+                longestStreakEl.textContent = `Longest Streak: ${longestStreak}x`;
+                gameOverScreen.classList.add('visible');
+            } else {
+                thanksScreen.classList.add('visible');
+            }
+        }
+        
+        // --- Event Listeners ---
+        window.addEventListener('resize', resizeCanvas);
+        canvas.addEventListener('click', (e) => placeBomb(e.clientX, e.clientY));
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            placeBomb(e.touches[0].clientX, e.touches[0].clientY);
+        });
+
+        playAgainButton.addEventListener('click', setupGame);
+        exitButton.addEventListener('click', () => endGame(false));
+
+        // --- Start the game ---
+        setupGame();
+
+    </script>
+</body>
+</html>
